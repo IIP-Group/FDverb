@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Parameters presetName="Aura" version="1">
+  <PARAM id="DRY" value="-24.0"/>
+  <PARAM id="TAIL" value="0.0"/>
+  <PARAM id="PREDELAY" value="22.0"/>
+  <PARAM id="DECAY" value="2500.0"/>
+  <PARAM id="TILT" value="1.0"/>
+  <PARAM id="LOWCUT" value="250.0"/>
+  <PARAM id="HIGHCUT" value="1000.0"/>
+  <PARAM id="LINK" value="0.0"/>
+  <PARAM id="TAILDELAY" value="200.0"/>
+  <PARAM id="WIDTH" value="1.0"/>
+  <PARAM id="ERTAPS" value="0.0"/>
+  <PARAM id="ERLEVEL" value="-60.0"/>
+  <PARAM id="COLOR" value="2.0"/>
+  <PARAM id="SHIFT" value="0.0"/>
+  <PARAM id="DRIFT" value="0.0"/>
+  <PARAM id="ENVMODE" value="1.0"/>
+  <PARAM id="FFTSIZE" value="9.0"/>
+  <PARAM id="FREEZE" value="0.0"/>
+  <PARAM id="FREEZEINPUT" value="0.0"/>
+</Parameters>

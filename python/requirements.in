@@ -1,0 +1,8 @@
+matplotlib==3.10.1
+matplot2tikz==0.5.4
+notebook==7.4.0
+numpy==2.5.0
+PyYAML==6.0.2
+papermill==2.7.0
+scipy==1.18.0
+tqdm==4.67.1

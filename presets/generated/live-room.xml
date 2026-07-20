@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Parameters presetName="Live Room" version="1">
+  <PARAM id="DRY" value="-6.0"/>
+  <PARAM id="TAIL" value="-6.0"/>
+  <PARAM id="PREDELAY" value="19.0"/>
+  <PARAM id="DECAY" value="700.0"/>
+  <PARAM id="TILT" value="-0.25"/>
+  <PARAM id="LOWCUT" value="20.0"/>
+  <PARAM id="HIGHCUT" value="20000.0"/>
+  <PARAM id="LINK" value="0.0"/>
+  <PARAM id="TAILDELAY" value="60.0"/>
+  <PARAM id="WIDTH" value="1.0"/>
+  <PARAM id="ERTAPS" value="20.0"/>
+  <PARAM id="ERLEVEL" value="-6.0"/>
+  <PARAM id="COLOR" value="1.0"/>
+  <PARAM id="SHIFT" value="0.0"/>
+  <PARAM id="DRIFT" value="0.0"/>
+  <PARAM id="ENVMODE" value="0.0"/>
+  <PARAM id="FFTSIZE" value="6.0"/>
+  <PARAM id="FREEZE" value="0.0"/>
+  <PARAM id="FREEZEINPUT" value="0.0"/>
+</Parameters>

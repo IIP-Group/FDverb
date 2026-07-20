@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Parameters presetName="Bell" version="1">
+  <PARAM id="DRY" value="-6.0"/>
+  <PARAM id="TAIL" value="-12.0"/>
+  <PARAM id="PREDELAY" value="22.0"/>
+  <PARAM id="DECAY" value="8000.0"/>
+  <PARAM id="TILT" value="-1.0"/>
+  <PARAM id="LOWCUT" value="20.0"/>
+  <PARAM id="HIGHCUT" value="20000.0"/>
+  <PARAM id="LINK" value="0.0"/>
+  <PARAM id="TAILDELAY" value="100.0"/>
+  <PARAM id="WIDTH" value="1.5"/>
+  <PARAM id="ERTAPS" value="18.0"/>
+  <PARAM id="ERLEVEL" value="-60.0"/>
+  <PARAM id="COLOR" value="2.0"/>
+  <PARAM id="SHIFT" value="0.0"/>
+  <PARAM id="DRIFT" value="0.0"/>
+  <PARAM id="ENVMODE" value="0.0"/>
+  <PARAM id="FFTSIZE" value="8.0"/>
+  <PARAM id="FREEZE" value="0.0"/>
+  <PARAM id="FREEZEINPUT" value="0.0"/>
+</Parameters>

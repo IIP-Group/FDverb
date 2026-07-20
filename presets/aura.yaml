@@ -1,0 +1,42 @@
+
+fft:
+    size: 16384
+
+envelope:
+    env_mode: "arithmetic"     # exponential, arithmetic
+    attack: 10                  # ms [python only]
+    decay: 2500                 # ms
+    color: 2.0                  # exponent
+    tilt: 1.0                   # -1 to 1
+    shift: 0                    # bins (static shift)
+    drift: 0                    # bins (dynamic shift)
+
+stereo:
+    link: false
+    width: 1.0                  # 0.0: mid, 1.0: mid+side, 2.0: side
+
+eq:
+    low_cut: 250                 # Hz
+    high_cut: 1000             # Hz
+
+early_reflections:
+    taps: 0
+    predelay: 22                # ms, relative to t=0
+    taildelay: 200              # ms, relative to t=0
+    decay_scale: 0.16           # [python only] decay rate for ERs relative to (global) RT60 for tail
+    er2tail_gain: 0.00          # [python only] send ER signal to tail reverberator
+    er_preset: null             # [python only] load a preset for the ER-IR: null, 'boston_er'
+
+mix:
+    dry_level: -24               # dB
+    er_level: -120               # dB
+    tail_level: -0             # dB
+
+foreverb:
+    enabled: false
+    freeze_input: false
+
+debug:
+    ignore_causality: false
+    transform_only: false
+    dev_option: null            # None
