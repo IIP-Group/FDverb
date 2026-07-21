@@ -21,6 +21,11 @@ The Python implementation has a number of extra features implemented, compared t
 - Send early-reflections signal to tail reverberator (config parameter `early_reflections:er2tail_gain:`).
 
 ## Getting Started
+
+See our [releases](https://github.com/IIP-Group/FDverb/releases) for pre-compiled binaries for the plugin.
+
+Alternatively, follow allong the instructions below to start building yourself.
+
 ```bash
 git clone --recurse-submodules git@github.com:IIP-Group/FDverb.git
 cd FDverb
