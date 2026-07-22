@@ -3,6 +3,18 @@
 A frequency-domain artificial reverberation effect.
 FDverb is implemented as a plugin (see [plugin/](plugin/), using the [JUCE framework](https://github.com/juce-framework/JUCE) and as an offline Python implementation (see [python/](python/)).
 
+## Credits
+
+Developed by [Integrated Information Processing (IIP) Group at ETH Zurich](https://iip.ethz.ch):
+
+- Nishanth Kumar
+- Silvan Krebs
+- David Wieland
+- Christoph Studer
+- Jonas Roth
+
+Built with [JUCE](https://juce.com).
+
 ## Features
 
 - Frequency-domain reverb processing using STFT
@@ -15,16 +27,16 @@ FDverb is implemented as a plugin (see [plugin/](plugin/), using the [JUCE frame
 - Stereo link and width control
 
 ### Python-Only Features
-The Python implementation has a number of extra features implemented, compared to the plug-in implementation:
+The Python implementation has a number of extra features implemented, compared to the plugin implementation:
 
 - Load a preset early-reflections IR (config parameter `early_reflections:er_preset:`).
 - Send early-reflections signal to tail reverberator (config parameter `early_reflections:er2tail_gain:`).
 
 ## Getting Started
 
-See our [releases](https://github.com/IIP-Group/FDverb/releases) for pre-compiled binaries for the plugin.
+See our [releases](https://github.com/IIP-Group/FDverb/releases) for pre-compiled plugin binaries.
 
-Alternatively, follow allong the instructions below to start building yourself.
+Alternatively, follow the instructions below to build from source.
 
 ```bash
 git clone --recurse-submodules git@github.com:IIP-Group/FDverb.git
@@ -69,7 +81,7 @@ pip-compile requirements.in
 ```
 
 
-## C++ Plugin (JUCE)
+## C++  (JUCE)
 ### Requirements
 - CMake 3.22+
 - C++17 compatible compiler
@@ -78,17 +90,17 @@ pip-compile requirements.in
 ### macOS
 Make Xcode project:
 ```bash
-mkdir plugin/build
-cd plugin/build
+mkdir /build
+cd /build
 cmake .. -G Xcode
 open FDverb.xcodeproj
 ```
 
-Build the VST3 or AU target in Xcode. Plugins are output to:
-- `plugin/build/FDverb_artefacts/Debug/VST3/FDverb.vst3`
-- `plugin/build/FDverb_artefacts/Debug/AU/FDverb.component`
+Build the VST3 or AU target in Xcode. s are output to:
+- `/build/FDverb_artefacts/Debug/VST3/FDverb.vst3`
+- `/build/FDverb_artefacts/Debug/AU/FDverb.component`
 
-After the build process, the plugins are automatically copied the standard user directory.
+After the build process, the s are automatically copied the standard user directory.
 If this behavior is undesired, remove the following line in `plugin/CMakeLists.txt`.
 ```Make
     COPY_PLUGIN_AFTER_BUILD TRUE
