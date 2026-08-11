@@ -18,11 +18,13 @@
 class Fdverb : private juce::Thread
 {
 public:
-    Fdverb(juce::AudioProcessorValueTreeState& apvts);
+    Fdverb();
     ~Fdverb() override;
 
     void prepare(double sampleRate, int samplesPerBlock, int maxNumInputChannels);
     void processBlock(juce::AudioBuffer<float>& buffer);
+    void requestReset();  // drop all reverb state, callable from any thread
+    bool isResetPending() const { return m_resetRequested.load(); }
 
     void setDryLevelDb(float db);
     void setTailLevelDb(float db);
@@ -38,7 +40,7 @@ public:
     void setERLevelDb(float db);
     void setColor(float color);
     void setShift(int shift);
-    void setDrift(int drift);
+    void setDrift(float drift);
     void setEnvelopeMode(std::string& mode);
     void setFreezeInput(bool freeze);
     void setFreeze(bool freeze);
@@ -59,14 +61,14 @@ private:
     void processWorkBuffer();
     void processFrame();
     void setupMLTWindow();
+    void resetWorkerState();  // worker thread only
 
 private:
-    juce::AudioProcessorValueTreeState& m_apvts;
-
     double m_sampleRate = 44100.0;
     int m_samplesPerBlock = 512;
     int m_maxNumInputChannels = 2;
     std::atomic<int> m_numInputChannels = 0; // updated at runtime
+    std::atomic<int> m_observedNumSamples { 0 }; // host block length, written on the audio thread
 
     // buffers
     std::vector<std::unique_ptr<LockFreeFifo>> m_sharedInputBuffer;
@@ -91,6 +93,11 @@ private:
     juce::WaitableEvent m_signal;
     std::atomic<bool> m_exit { false };
 
+    // Reset handshake: requestReset() raises m_resetRequested, the worker clears its own state and
+    // confirms with m_workerResetDone, the audio thread clears its own state and drops the request.
+    std::atomic<bool> m_resetRequested { false };
+    std::atomic<bool> m_workerResetDone { false };
+
     // parameters
     int m_blockSize = 8192;
     int m_hopSize = m_blockSize/2;
@@ -107,6 +114,11 @@ private:
     bool m_freezeInput = false;
 
     std::atomic<bool> m_isPrepared { false };
+
+#ifdef FDVERB_LOG_BLOCKSIZE
+    void logBlockSize();         // worker thread only
+    int m_loggedNumSamples = 0;  // worker thread only
+#endif
 
 #ifdef FDVERB_MEASURE_TIMING
     std::ofstream m_timingFile;

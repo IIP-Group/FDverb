@@ -1,0 +1,29 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "macos",
+      "displayName": "macOS (Xcode)",
+      "generator": "Xcode",
+      "binaryDir": "${sourceDir}/build",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" }
+    },
+    {
+      "name": "windows",
+      "displayName": "Windows (Ninja Multi-Config)",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "macos-debug",     "configurePreset": "macos",   "configuration": "Debug"   },
+    { "name": "macos-release",   "configurePreset": "macos",   "configuration": "Release" },
+    { "name": "windows-debug",   "configurePreset": "windows", "configuration": "Debug"   },
+    { "name": "windows-release", "configurePreset": "windows", "configuration": "Release" }
+  ]
+}

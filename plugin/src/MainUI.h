@@ -9,6 +9,7 @@
 #include "FdverbLookAndFeel.h"
 #include "Utils.h"
 #include "SpectralDisplay.h"
+#include "ErDisplay.h"
 
 namespace HelperFunctions
 {
@@ -48,6 +49,15 @@ namespace HelperFunctions
         {
             return text.retainCharacters("0123456789.").getDoubleValue();
         };
+    }
+
+    // Slider and Button attachments route preset recalls and host automation through onValueChange
+    // and onClick as well, so control callbacks that drive the UI need to tell those apart from a
+    // change the user made. A drag, a click, the mouse wheel, an arrow key or an edit in a text box
+    // all leave the control under the pointer or holding focus.
+    inline bool isUserDrivenChange(const juce::Component& control)
+    {
+        return control.isMouseButtonDown() || control.isMouseOverOrDragging() || control.hasKeyboardFocus(true);
     }
 
     inline void configureFrequencySlider(juce::Slider& slider)
@@ -170,6 +180,9 @@ public:
 
     void resized() override;
 
+    // freeze stops the envelope decaying, which flattens the plotted tail region
+    std::function<void()> onErPlotTouched;
+
 private:
     juce::AudioProcessorValueTreeState& m_apvts;
 
@@ -197,6 +210,9 @@ public:
     void paint(juce::Graphics& g) override;
     void resized() override;
 
+    // the block size moves the FFT latency floor, and with it the start of the tail region
+    std::function<void()> onErPlotTouched;
+
 private:
     juce::AudioProcessorValueTreeState& m_apvts;
     FDverbAudioProcessor& audioProcessor;
@@ -223,6 +239,9 @@ public:
     ~EnvelopeComponent() override = default;
 
     void resized() override;
+
+    // the envelope mode decides whether the plotted tail region is a straight line or a curve
+    std::function<void()> onErPlotTouched;
 
 private:
     std::unique_ptr<TitleWithLinesComponent> titleComponent;
@@ -252,6 +271,9 @@ public:
     ~DecayTiltComponent() override;
 
     void resized() override;
+
+    // decay sets the slope of the plotted tail region
+    std::function<void()> onErPlotTouched;
 
 private:
     std::unique_ptr<TitleWithLinesComponent> titleComponent;
@@ -314,6 +336,9 @@ public:
     ~LinkWidthComponent() override;
 
     void resized() override;
+
+    // width sets the per-tap pan, so the plot has to follow it while it is on screen
+    std::function<void()> onErPlotTouched;
 
 private:
     std::unique_ptr<TitleWithLinesComponent> titleComponent;
@@ -401,7 +426,15 @@ public:
     void paint(juce::Graphics& g) override;
     void resized() override;
 
+    // marks the range below the tail-delay floor as unreachable; call when the floor may have moved
+    void refreshTailDelayFloor();
+
+    // called when the user adjusts a knob that rebuilds the ER tap table
+    std::function<void()> onErTapsTouched;
+
 private:
+    void notifyErTapsTouched(const juce::Slider& source);
+
     std::unique_ptr<TitleWithLinesComponent> titleComponent;
 
     juce::Slider erTapsSlider;
@@ -416,6 +449,9 @@ private:
     juce::Slider tailDelaySlider;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> tailDelayAttachment;
     juce::Label tailDelayLabel;
+    juce::Label tailDelayEffectiveLabel;  // shows the value in use while the setting is clamped
+    float m_shownTailDelayFloorMs = -1.0f;
+    bool m_tailDelayClamped = false;
 
     FDverbAudioProcessor& audioProcessor;
 
@@ -434,7 +470,13 @@ public:
 
     void resized() override;
 
+    // ER level sets the height of the plotted taps and tail level that of the tail region, so both
+    // have to redraw while the plot is up
+    std::function<void()> onErPlotTouched;
+
 private:
+    void notifyErPlotTouched(const juce::Slider& source);
+
     std::unique_ptr<TitleWithLinesComponent> titleComponent;
 
     juce::Slider drySlider;
@@ -473,6 +515,10 @@ private:
 
     static constexpr bool kShowDevInfo = false;
 
+    // the FFT latency floor only moves once the processor has re-prepared, a moment after the block
+    // size changes, so the tail region has to be refreshed after the fact rather than on the knob
+    float m_lastTailDelayFloorMs = -1.0f;
+
     // Title bar
     std::unique_ptr<FDverbTitleComponent> titleComponent;
     std::unique_ptr<FreezeTitleComponent> freezeTitleComponent;
@@ -481,8 +527,9 @@ private:
     juce::Label buildIdLabel;
     juce::Label effectiveFftSizeLabel;
 
-    // Visualization
+    // Visualization — erDisplay temporarily overlays spectralDisplay and shares its bounds
     std::unique_ptr<SpectralDisplay> spectralDisplay;
+    std::unique_ptr<ErDisplay> erDisplay;
 
     // Left column
     std::unique_ptr<FFTSizeComponent> fftsizeComponent;

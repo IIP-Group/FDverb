@@ -11,7 +11,7 @@
   <PARAM id="TAILDELAY" value="60.0"/>
   <PARAM id="WIDTH" value="1.0"/>
   <PARAM id="ERTAPS" value="20.0"/>
-  <PARAM id="ERLEVEL" value="-6.0"/>
+  <PARAM id="ERLEVEL" value="-9.0"/>
   <PARAM id="COLOR" value="1.0"/>
   <PARAM id="SHIFT" value="0.0"/>
   <PARAM id="DRIFT" value="0.0"/>

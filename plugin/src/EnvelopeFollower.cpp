@@ -22,7 +22,8 @@ void EnvelopeFollower::prepare(int numBins, int maxNumChannels, double sampleRat
     m_blockSize = blockSize;
     m_hopSize = hopSize;
 
-    m_decayCoeffs.assign(static_cast<size_t>(numBins), 1.0f);
+    m_decayCoeffsExp.assign(static_cast<size_t>(numBins), 1.0f);
+    m_decayCoeffsArith.assign(static_cast<size_t>(numBins), 1.0f);
     m_envelopes.assign(static_cast<size_t>(maxNumChannels), std::vector<float>(static_cast<size_t>(numBins)));
 
     updateCoefficients();
@@ -33,6 +34,9 @@ void EnvelopeFollower::reset()
     for (auto& env : m_envelopes) {
         std::fill(env.begin(), env.end(), 0.0f);
     }
+
+    m_driftAccum = 0.0f;
+    m_driftIntShift = 0;
 }
 
 void EnvelopeFollower::process(int channel, const float* fftData, int fftSize)
@@ -40,6 +44,17 @@ void EnvelopeFollower::process(int channel, const float* fftData, int fftSize)
     // juce fft data is in interleaved format ( [real0, imag0, real1, imag1, ...]
 
     auto& env = m_envelopes[static_cast<size_t>(channel)];
+
+    // read mode and matching coefficients once: they are written from the audio thread
+    const bool arithmetic = (m_envelopeMode == EnvelopeMode::arithmetic);
+    const float* decayCoeffs = arithmetic ? m_decayCoeffsArith.data() : m_decayCoeffsExp.data();
+
+    // Advance fractional drift accumulator once per hop (channel 0 only so all channels share the shift)
+    if (channel == 0) {
+        m_driftAccum += m_drift;
+        m_driftIntShift = static_cast<int>(std::trunc(m_driftAccum));
+        m_driftAccum -= static_cast<float>(m_driftIntShift);
+    }
 
     // create copy to prevent overwriting for positive drift values
     std::vector<float> env_copy(m_envelopes[static_cast<size_t>(channel)].begin(),
@@ -58,24 +73,24 @@ void EnvelopeFollower::process(int channel, const float* fftData, int fftSize)
         }
 
         // drift offsets which envelope state you read from
-        int envBin = static_cast<int>(i) - m_drift; // same here
+        int envBin = static_cast<int>(i) - m_driftIntShift;
         float prevEnv = 0.f;    // assign default value, used if outside bounds
         if (envBin >= 0 && envBin < m_numBins) {
             prevEnv = env_copy[static_cast<size_t>(envBin)];
         }
 
         if (!m_freeze) {
-            if (m_envelopeMode == "exponential") {
+            if (!arithmetic) {
                 if (mag >= prevEnv) {
                     env[i] = m_attackCoeff * mag + (1.0f - m_attackCoeff) * prevEnv;
                 } else {
-                    env[i] = m_decayCoeffs[i] * mag + (1.0f - m_decayCoeffs[i]) * prevEnv;
+                    env[i] = decayCoeffs[i] * mag + (1.0f - decayCoeffs[i]) * prevEnv;
                 }
             } else { // arithmetic
                 if (mag >= prevEnv) {
                     env[i] = std::min(prevEnv + m_attackCoeff, mag);
                 } else {
-                    env[i] = std::max(0.0f, std::max(prevEnv - m_decayCoeffs[i], mag));
+                    env[i] = std::max(0.0f, std::max(prevEnv - decayCoeffs[i], mag));
                 }
             }
         } else { // freeze, ignore m_envelopeMode
@@ -84,6 +99,11 @@ void EnvelopeFollower::process(int channel, const float* fftData, int fftSize)
             // Gate open: louder incoming audio can paint over the drifted value
             if (!m_freezeGateClosed && mag > env[i])
                 env[i] = mag;
+        }
+
+        // NaN or negative values would feed back forever and mute the plugin
+        if (!(env[i] >= 0.0f)) {
+            env[i] = 0.0f;
         }
     }
 }
@@ -117,18 +137,25 @@ void EnvelopeFollower::linkEnvelopes()
 
 void EnvelopeFollower::setDecay(float ms)
 {
+    if (ms == m_decayMs) {
+        return;
+    }
     m_decayMs = ms;
     updateCoefficients();
 }
 
 void EnvelopeFollower::setEnvelopeMode(const std::string& mode)
 {
-    m_envelopeMode = mode;
+    m_envelopeMode = (mode == "arithmetic") ? EnvelopeMode::arithmetic : EnvelopeMode::exponential;
 }
 
 void EnvelopeFollower::setTilt(float tilt)
 {
+    if (tilt == m_tilt) {
+        return;
+    }
     m_tilt = tilt;
+    updateCoefficients();
 }
 
 void EnvelopeFollower::setLinkEnvelopes(bool link)
@@ -141,9 +168,9 @@ void EnvelopeFollower::setShift(int shift)
     m_shift = shift;
 }
 
-void EnvelopeFollower::setDrift(int shift)
+void EnvelopeFollower::setDrift(float drift)
 {
-    m_drift = shift;
+    m_drift = drift;
 }
 
 void EnvelopeFollower::setColor(float color)
@@ -196,7 +223,7 @@ void EnvelopeFollower::updateCoefficients()
     const float k_tiltMidFreqHz = std::sqrt(k_tiltUpperFreqHz * k_tiltLowerFreqHz);
     const float k_scaleFactor = 2.0f / std::log10(k_tiltUpperFreqHz / k_tiltLowerFreqHz);
 
-    for (size_t i = 0; i < m_numBins; ++i) {
+    for (size_t i = 0; i < static_cast<size_t>(m_numBins); ++i) {
         float binTilt = 1.f + m_tilt;
         if (i != 0) {
             float binFreqHz = i * static_cast<float>(m_sampleRate) / m_blockSize;
@@ -204,13 +231,9 @@ void EnvelopeFollower::updateCoefficients()
         }
         binTilt = std::clamp(binTilt, 0.0f, 2.0f);
 
-        if (m_envelopeMode == "exponential") {
-            m_decayCoeffs[i] = tSixtyToCoef(m_decayMs*binTilt, m_hopSize, m_sampleRate);
-        } else if (m_envelopeMode == "arithmetic") {
-            m_decayCoeffs[i] = tOneToCoef(m_decayMs*binTilt, m_hopSize, m_sampleRate);
-        } else { // freeze
-            m_decayCoeffs[i] = 1.0f;
-        }
+        // binTilt == 0 means instant decay: coeff 1 (exponential) resp. +inf (arithmetic)
+        m_decayCoeffsExp[i] = tSixtyToCoef(m_decayMs*binTilt, m_hopSize, m_sampleRate);
+        m_decayCoeffsArith[i] = tOneToCoef(m_decayMs*binTilt, m_hopSize, m_sampleRate);
     }
 
     // attack coeff

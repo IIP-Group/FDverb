@@ -16,6 +16,8 @@ public:
     void releaseResources() override;
     bool isBusesLayoutSupported(const BusesLayout& layouts) const override;
     void processBlock(juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    void processBlockBypassed(juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    void reset() override;
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override;
@@ -37,6 +39,7 @@ public:
     void setStateInformation(const void* data, int sizeInBytes) override;
 
     void updateEnvelopeDisplay();
+    void clearEnvelopeDisplay();
     static constexpr int kNumDisplayBins = 96;
     std::array<std::atomic<float>, kNumDisplayBins> envelopeDisplay;
 
@@ -54,6 +57,12 @@ private:
     Fdverb m_fdverb;
 
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+
+    void resetReverbState();  // shared by both bypass edges and the host reset() hook
+
+    // audio thread only: set while the host renders us bypassed, so the leaving edge is detectable.
+    // Hosts that bypass by not rendering at all never set it and reach us through reset() instead.
+    bool m_bypassed { false };
 
     std::atomic<int> m_pendingFftSize { -1 };  // -1 means no pending change
     static int fftSizeFromIndex(int index);

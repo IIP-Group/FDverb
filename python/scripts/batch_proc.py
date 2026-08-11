@@ -4,10 +4,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 #
-# Run this script as
+# Run this script from any directory, using the python/env_fdverb interpreter, as
 # ```
-# cd python
-# python scripts/batch_proc.py
+# python python/scripts/batch_proc.py
 # ```
 # output path is set below
 
@@ -17,7 +16,11 @@ import os
 import warnings
 import hashlib
 
-temp_notebook_dir = "tmp/"
+# Everything is located relative to this file, so the working directory does not matter.
+python_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+notebook = os.path.join(python_dir, "FDverb.ipynb")
+
+temp_notebook_dir = os.path.join(python_dir, "tmp")
 
 
 def get_audio_files(audio_dir):
@@ -26,12 +29,13 @@ def get_audio_files(audio_dir):
 
 def run_fdverb(config_file, input_file, output_file):
 
-    notebook_path = temp_notebook_dir + infile.replace(
-        ".wav", "_" + config.replace(".yaml", "") + ".local.ipynb"
+    notebook_path = os.path.join(
+        temp_notebook_dir,
+        infile.replace(".wav", "_" + config.replace(".yaml", "") + ".local.ipynb"),
     )
 
     pm.execute_notebook(
-        "FDverb.ipynb",
+        notebook,
         notebook_path,
         parameters={
             "config_file": config_file,
@@ -39,6 +43,8 @@ def run_fdverb(config_file, input_file, output_file):
             "output_file": output_file,
             "write_audio_to_file": True,
         },
+        # the notebook finds the presets via Path.cwd() / ".."
+        cwd=python_dir,
     )
 
 
@@ -70,7 +76,7 @@ if __name__ == "__main__":
         "drifter.yaml"
     ]
 
-    input_dir = "audio_in"
+    input_dir = os.path.join(python_dir, "audio_in")
     # infile_list = get_audio_files(input_dir)
     infile_list = [
         "organ.wav",
@@ -78,7 +84,7 @@ if __name__ == "__main__":
         "piano.wav"
     ]
 
-    output_dir = "out/batch"
+    output_dir = os.path.join(python_dir, "out", "batch")
 
     os.makedirs(temp_notebook_dir, exist_ok=True)
 

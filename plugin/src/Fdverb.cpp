@@ -6,8 +6,8 @@
 #include "Fdverb.h"
 #include "Utils.h"
 
-Fdverb::Fdverb(juce::AudioProcessorValueTreeState& apvts)
-    : juce::Thread("Fdverb Worker"), m_apvts(apvts)
+Fdverb::Fdverb()
+    : juce::Thread("Fdverb Worker")
 {
 }
 
@@ -25,6 +25,15 @@ void Fdverb::run()
 
         if (threadShouldExit() || m_exit.load()) {
             break;
+        }
+
+#ifdef FDVERB_LOG_BLOCKSIZE
+        logBlockSize();
+#endif
+
+        if (m_resetRequested.load() && !m_workerResetDone.load()) {
+            resetWorkerState();
+            m_workerResetDone.store(true);
         }
 
         while (m_sharedInputBuffer[0]->getNumReady() >= m_hopSize
@@ -95,8 +104,20 @@ void Fdverb::prepare(double sampleRate, int samplesPerBlock, int maxNumInputChan
     m_tailDelayLine.prepare(spec);
     m_tailDelayLine.reset();
 
-    m_earlyReflections.prepare(sampleRate, samplesPerBlock, maxNumInputChannels, 32, 1000.0f); // 32 taps max, 1000ms max delay (max predelay + max taildelay)
+    m_earlyReflections.prepare(sampleRate, samplesPerBlock, maxNumInputChannels,
+                               EarlyReflections::kMaxNumTaps, 1000.0f); // 1000ms max delay (max predelay + max taildelay)
     m_erBuffer.setSize(maxNumInputChannels, samplesPerBlock);
+    m_erBuffer.clear();
+
+    m_observedNumSamples.store(0, std::memory_order_relaxed);
+
+    // everything is zeroed above, so a request from before this point is already satisfied
+    m_resetRequested.store(false);
+    m_workerResetDone.store(false);
+
+#ifdef FDVERB_LOG_BLOCKSIZE
+    m_loggedNumSamples = 0;
+#endif
 
     m_exit.store(false);
     startThread(juce::Thread::Priority::high);
@@ -108,9 +129,30 @@ void Fdverb::processBlock(juce::AudioBuffer<float>& buffer)
 {
     m_numInputChannels = buffer.getNumChannels();
 
+    // samplesPerBlock is only an upper bound, so read the block length from the buffer
+    const int numSamples = buffer.getNumSamples();
+    m_observedNumSamples.store(numSamples, std::memory_order_relaxed);
+
+    // Pending reset: clear the state this thread owns and stay pending until the worker confirms,
+    // so a frame it queued just before seeing the request is dropped below instead of played out.
+    const bool resetting = m_resetRequested.load();
+    if (resetting) {
+        m_tailDelayLine.reset();
+        m_earlyReflections.reset();
+        if (m_workerResetDone.load()) {
+            m_resetRequested.store(false);
+        }
+    }
+
+    // hosts should never exceed the announced block size, but grow rather than overflow
+    if (numSamples > m_dryBuffer.getNumSamples()) {
+        m_dryBuffer.setSize(m_maxNumInputChannels, numSamples, false, true, true);
+        m_erBuffer.setSize(m_maxNumInputChannels, numSamples, false, true, true);
+    }
+
     // copy dry signal for final mix
     for (int ch = 0; ch < m_numInputChannels; ++ch) {
-        m_dryBuffer.copyFrom(ch, 0, buffer, ch, 0, buffer.getNumSamples());
+        m_dryBuffer.copyFrom(ch, 0, buffer, ch, 0, numSamples);
     }
 
     // freeze input
@@ -118,14 +160,13 @@ void Fdverb::processBlock(juce::AudioBuffer<float>& buffer)
         buffer.clear();
     }
 
-    // early reflections
-    m_erBuffer.clear();
-    m_earlyReflections.calculateTaps(m_predelayMs, m_taildelayMs, m_decayMs, juce::jmin(m_width, 1.0f), m_numERTaps);
-    m_earlyReflections.processBlock(m_dryBuffer, m_erBuffer);
+    // early reflections (overwrites the first numSamples of m_erBuffer)
+    m_earlyReflections.calculateTaps(m_predelayMs, m_taildelayMs, juce::jmin(m_width, 1.0f), m_numERTaps);
+    m_earlyReflections.processBlock(m_dryBuffer, m_erBuffer, numSamples);
 
     // write incoming samples to ring buffer
     for (int ch = 0; ch < m_numInputChannels; ++ch) {
-        m_sharedInputBuffer[ch]->write(buffer.getReadPointer(ch), buffer.getNumSamples());
+        m_sharedInputBuffer[ch]->write(buffer.getReadPointer(ch), numSamples);
     }
 
     if (m_sharedInputBuffer[0]->getNumReady() >= m_hopSize) {
@@ -133,12 +174,19 @@ void Fdverb::processBlock(juce::AudioBuffer<float>& buffer)
     }
 
     for (int ch = 0; ch < m_numInputChannels; ++ch) {
-        int got = m_sharedOutputBuffer[ch]->read(buffer.getWritePointer(ch), buffer.getNumSamples());
-        if (got < buffer.getNumSamples()) {
-            DBG("underrun: " << (buffer.getNumSamples() - got));
+        if (resetting) {
+            // drop the queued tail rather than let it play out, and output silence in its place
+            m_sharedOutputBuffer[ch]->discardAll();
+            buffer.clear(ch, 0, numSamples);
+            continue;
+        }
+
+        int got = m_sharedOutputBuffer[ch]->read(buffer.getWritePointer(ch), numSamples);
+        if (got < numSamples) {
+            DBG("underrun: " << (numSamples - got));
             juce::FloatVectorOperations::clear(
                 buffer.getWritePointer(ch) + got,
-                buffer.getNumSamples() - got);
+                numSamples - got);
         }
     }
 
@@ -179,6 +227,26 @@ void Fdverb::processBlock(juce::AudioBuffer<float>& buffer)
     }
 }
 
+void Fdverb::requestReset()
+{
+    m_workerResetDone.store(false);   // must be cleared before the request is visible
+    m_resetRequested.store(true);
+    m_signal.signal();                // the worker also resets while no audio is flowing
+}
+
+// Clears the state owned by the worker thread. The worker is the consumer of the input fifo, so it
+// is also the side that may drop its queued samples.
+void Fdverb::resetWorkerState()
+{
+    m_envelopeFollower.reset();
+    m_overlapAddBuffer.clear();
+    m_inputHistory.clear();
+
+    for (auto& ch : m_sharedInputBuffer) {
+        ch->discardAll();
+    }
+}
+
 void Fdverb::setDryLevelDb(float db) { m_dryLevelDb = db; }
 void Fdverb::setTailLevelDb(float db) { m_tailLevelDb = db; }
 void Fdverb::setPredelayMs(float ms) { m_predelayMs = ms; }
@@ -193,7 +261,7 @@ void Fdverb::setNumERTaps(int taps) { m_numERTaps = taps; }
 void Fdverb::setERLevelDb(float db) { m_erLevelDb = db; }
 void Fdverb::setColor(float color) { m_envelopeFollower.setColor(color); }
 void Fdverb::setShift(int shift) { m_envelopeFollower.setShift(shift); }
-void Fdverb::setDrift(int drift) { m_envelopeFollower.setDrift(drift); }
+void Fdverb::setDrift(float drift) { m_envelopeFollower.setDrift(drift); }
 void Fdverb::setEnvelopeMode(std::string& mode) { m_envelopeFollower.setEnvelopeMode(mode); }
 void Fdverb::setFreezeInput(bool freeze) { m_freezeInput = freeze; m_envelopeFollower.setFreezeGateClosed(freeze); }
 void Fdverb::setFreeze(bool freeze) { m_envelopeFollower.setFreeze(freeze); }
@@ -390,13 +458,9 @@ void Fdverb::setFFTSizeAndReprepare(int newN)
 
     prepare(m_sampleRate, m_samplesPerBlock, m_maxNumInputChannels);
 
-    float newFloor = getMinTailDelayMs();
-    if (auto* tailParam = m_apvts.getParameter("TAILDELAY")) {
-        float current = tailParam->convertFrom0to1(tailParam->getValue());
-        if (current < newFloor) {
-            tailParam->setValueNotifyingHost(tailParam->convertTo0to1(newFloor));
-        }
-    }
+    // The tail-delay floor is not written back to the parameter: processBlock clamps it, and the
+    // editor shows the unreachable range. Writing it here would ratchet the user setting upwards
+    // and break the host contract that a parameter keeps the value the host set.
 }
 
 float Fdverb::getMinTailDelayMs() const
@@ -421,3 +485,24 @@ float Fdverb::getMinTailDelayMs() const
 
     return fixedDelayMs + processingDelayMs;
 }
+
+#ifdef FDVERB_LOG_BLOCKSIZE
+// Temporary diagnostic: records every distinct host block length seen, to compare against the
+// samplesPerBlock announced in prepareToPlay. Runs on the worker thread, not the audio thread.
+void Fdverb::logBlockSize()
+{
+    const int observed = m_observedNumSamples.load(std::memory_order_relaxed);
+    if (observed == 0 || observed == m_loggedNumSamples) {
+        return;
+    }
+    m_loggedNumSamples = observed;
+
+    juce::File::getSpecialLocation(juce::File::userDesktopDirectory)
+        .getChildFile("fdverb_blocksize.log")
+        .appendText(juce::Time::getCurrentTime().toString(true, true)
+                    + "  sampleRate=" + juce::String(m_sampleRate)
+                    + "  announced=" + juce::String(m_samplesPerBlock)
+                    + "  actual=" + juce::String(observed)
+                    + (observed == m_samplesPerBlock ? "  match\n" : "  MISMATCH\n"));
+}
+#endif

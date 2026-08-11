@@ -14,6 +14,10 @@ struct MyColours
         inline static const juce::Colour accentColourAlternate = juce::Colour(0xffaaaaaa);
         inline static const juce::Colour valueTextColour = juce::Colour(0xffeeeeee);
 
+        // Right channel of the ER plot in colour mode; it stays accentColourAlternate in gray mode,
+        // and the left channel is accentColour in both.
+        inline static const juce::Colour erTapRightColour = juce::Colour(0xffff3b30);
+
         // Fill colours for knobs and toggle buttons, grouped by signal role:
         inline static const juce::Colour erFillColour   = juce::Colour(0xff383838);
         inline static const juce::Colour dryFillColour  = juce::Colour(0xff555555);
@@ -101,6 +105,18 @@ public:
         g.setColour(MyColours::accentColour);
         g.fillEllipse(centre.x - 3, centre.y - 3, 6, 6);
         
+        // Unreachable range: values the processor clamps away (see ErPreTailComponent)
+        const float unreachable = (float) (double) slider.getProperties().getWithDefault("unreachableBelow", 0.0);
+        const float limitAngle = rotaryStartAngle + unreachable * (rotaryEndAngle - rotaryStartAngle);
+
+        if (unreachable > 0.0f) {
+            juce::Path deadZone;
+            deadZone.addCentredArc(centre.x, centre.y, radius + 10, radius + 10,
+                                   0.0f, rotaryStartAngle, limitAngle, true);
+            g.setColour(MyColours::accentColour.withAlpha(0.25f));
+            g.strokePath(deadZone, juce::PathStrokeType(3.0f));
+        }
+
         // Value arc
         if (slider.isEnabled() && toAngle > rotaryStartAngle) {
             juce::Path arc;
@@ -109,7 +125,16 @@ public:
             g.setColour(MyColours::accentColourAlternate);
             g.strokePath(arc, juce::PathStrokeType(3.0f));
         }
-        
+
+        // Tick marking the limit, drawn on top of both arcs so it stays readable either side of it
+        if (unreachable > 0.0f) {
+            const float c = std::cos(limitAngle - juce::MathConstants<float>::halfPi);
+            const float s = std::sin(limitAngle - juce::MathConstants<float>::halfPi);
+            g.setColour(MyColours::accentColour);
+            g.drawLine(juce::Line<float>(centre.x + (radius + 5) * c, centre.y + (radius + 5) * s,
+                                        centre.x + (radius + 15) * c, centre.y + (radius + 15) * s), 2.0f);
+        }
+
     }
     
     // void drawToggleButton(juce::Graphics& g, juce::ToggleButton& button,

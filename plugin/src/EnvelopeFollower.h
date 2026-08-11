@@ -27,12 +27,14 @@ public:
     void setTilt(float tilt);
     void setLinkEnvelopes(bool link);
     void setShift(int shift);
-    void setDrift(int drift);
+    void setDrift(float drift);
     void setColor(float color);
     void setFreeze(bool freeze);
     void setFreezeGateClosed(bool closed);
 
 private:
+    enum class EnvelopeMode { exponential, arithmetic };
+
     void updateCoefficients();
 
     std::vector<std::vector<float>> m_envelopes;
@@ -46,14 +48,17 @@ private:
     float m_attackMs = 10.0f;
     float m_decayMs = 500.0f; // rt60
     float m_attackCoeff = 0.0f;
-    std::vector<float> m_decayCoeffs;
+    std::vector<float> m_decayCoeffsExp;
+    std::vector<float> m_decayCoeffsArith;
     float m_tilt = 1.0f;
     bool m_linkEnvelopes = false;
     int m_shift = 0;
-    int m_drift = 0;
+    float m_drift = 0.0f;
+    float m_driftAccum = 0.0f;
+    int   m_driftIntShift = 0;  // integer bins to shift this hop, reused across channels
     float m_color = 0.0f;
     bool m_freeze = false;
     bool m_freezeGateClosed = false;
 
-    std::string m_envelopeMode = "exponential";
+    EnvelopeMode m_envelopeMode = EnvelopeMode::exponential;
 };

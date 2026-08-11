@@ -8,6 +8,13 @@
 SpectralDisplay::SpectralDisplay(FDverbAudioProcessor& processor)
     : m_processor(processor)
 {
+    m_logoWhite  = juce::ImageCache::getFromMemory(BinaryData::FDverb_Logo_White_png,
+                                                   BinaryData::FDverb_Logo_White_pngSize);
+    m_logoColour = juce::ImageCache::getFromMemory(BinaryData::FDverb_Logo_Color_png,
+                                                   BinaryData::FDverb_Logo_Color_pngSize);
+
+    // the canvas is clickable, so it advertises itself the same way the ETH logo does
+    setMouseCursor(juce::MouseCursor::PointingHandCursor);
     startTimerHz(30);
 }
 
@@ -23,23 +30,44 @@ void SpectralDisplay::resized()
         m_spectrogram = juce::Image(juce::Image::ARGB, bounds.getWidth(), bounds.getHeight(), true);
         m_writePos = 0;
 
-        // Paint logo into the initial empty image — it scrolls out naturally as audio fills in
-        juce::Graphics g(m_spectrogram);
-        juce::Image logo = juce::ImageCache::getFromMemory(BinaryData::FDverb_Logo_White_png,
-                                                           BinaryData::FDverb_Logo_White_pngSize);
-        if (logo.isValid()) {
-            g.setOpacity(0.75f);
-            auto area = bounds.reduced(8, 50);
-            g.drawImageWithin(logo, area.getX(), area.getY(), area.getWidth(), area.getHeight(),
-                              juce::RectanglePlacement::xRight | juce::RectanglePlacement::yMid |
-                              juce::RectanglePlacement::onlyReduceInSize);
-        } else {
-            g.setColour(juce::Colours::white.withAlpha(0.5f));
-            g.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 22.0f, juce::Font::bold));
-            g.drawFittedText("FDverb", bounds.withTrimmedLeft(bounds.getWidth() / 2),
-                             juce::Justification::centredRight, 1);
-        }
+        // Where the logo starts out. It is drawn as an overlay rather than painted into the image
+        // so that switching colour map can swap it for the matching variant — it still scrolls out
+        // to the left in step with the canvas, exactly as a painted-in logo would.
+        m_logoScrollPx = 0;
+        auto area = bounds.reduced(8, 50).toFloat();
+        m_logoArea = m_logoWhite.isValid()
+            ? juce::RectanglePlacement(juce::RectanglePlacement::xRight |
+                                       juce::RectanglePlacement::yMid |
+                                       juce::RectanglePlacement::onlyReduceInSize)
+                  .appliedTo(m_logoWhite.getBounds().toFloat(), area)
+            : area.removeFromRight(area.getWidth() * 0.5f);
     }
+}
+
+void SpectralDisplay::drawLogo(juce::Graphics& g)
+{
+    const auto area = m_logoArea.translated(-(float) m_logoScrollPx, 0.0f);
+    if (area.getRight() <= 0.0f)
+        return;
+
+    // The colour variant was generated from the white one through this display's own colour map,
+    // so the logo reads as part of the spectrum in whichever mode is active.
+    const juce::Image& logo = (m_displayState == DisplayState::ColorMap) ? m_logoColour : m_logoWhite;
+
+    if (logo.isValid()) {
+        g.setOpacity(0.75f);
+        g.drawImage(logo, area);
+    } else {
+        g.setColour(juce::Colours::white.withAlpha(0.5f));
+        g.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 22.0f, juce::Font::bold));
+        g.drawText("FDverb", area, juce::Justification::centredRight, false);
+    }
+
+    // Sits under the logo to advertise that clicking the canvas cycles the colour map
+    g.setColour(juce::Colours::white.withAlpha(0.75f));
+    g.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 11.0f, juce::Font::plain));
+    g.drawText("click me!", area.withY(area.getBottom() + 4.0f).withHeight(14.0f),
+               juce::Justification::centred, false);
 }
 
 void SpectralDisplay::mouseUp(const juce::MouseEvent& /*event*/)
@@ -47,13 +75,17 @@ void SpectralDisplay::mouseUp(const juce::MouseEvent& /*event*/)
     switch (m_displayState)
     {
         case DisplayState::GrayMap:  m_displayState = DisplayState::ColorMap; break;
-        case DisplayState::ColorMap: m_displayState = DisplayState::Off; break;
+        case DisplayState::ColorMap: m_displayState = DisplayState::ErPlot;   break;
+        case DisplayState::ErPlot:   m_displayState = DisplayState::Off;      break;
         case DisplayState::Off:
             m_displayState = DisplayState::GrayMap;
             m_spectrogram.clear(m_spectrogram.getBounds(), juce::Colours::black);
             break;
     }
     repaint();
+
+    if (onDisplayStateChanged)
+        onDisplayStateChanged();
 }
 
 void SpectralDisplay::timerCallback()
@@ -61,14 +93,17 @@ void SpectralDisplay::timerCallback()
     if (m_spectrogram.isNull())
         return;
 
-    if (m_displayState == DisplayState::Off)
+    // ErPlot hands the canvas to the ER plot, which paints over the whole of it: idle like Off
+    if (m_displayState == DisplayState::Off || m_displayState == DisplayState::ErPlot)
         return;
 
     int width = m_spectrogram.getWidth();
     int height = m_spectrogram.getHeight();
 
-    // Shift entire image left by one pixel
+    // Shift entire image left by one pixel — the logo overlay travels with it
     m_spectrogram.moveImageSection(0, 0, 1, 0, width - 1, height);
+    if (m_logoArea.getRight() - (float) m_logoScrollPx > 0.0f)
+        ++m_logoScrollPx;
 
     // Write new column at the right edge
     int x = width - 1;
@@ -142,18 +177,25 @@ void SpectralDisplay::paint(juce::Graphics& g)
     g.fillRect(bounds);
 
     // Draw spectrogram
-    if (m_displayState != DisplayState::Off && !m_spectrogram.isNull())
+    const bool showSpectrogram = (m_displayState == DisplayState::GrayMap ||
+                                  m_displayState == DisplayState::ColorMap);
+    if (showSpectrogram && !m_spectrogram.isNull()) {
         g.drawImageAt(m_spectrogram, 0, 0);
+        drawLogo(g);
+    }
 
     // Border
     g.setColour(MyColours::accentColour.withAlpha(0.5f));
     g.drawRect(bounds, 1.0f);
 
-    // Label
-    g.setColour(MyColours::accentColour.withAlpha(0.6f));
-    g.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 10.0f, juce::Font::bold));
-    juce::String label = (m_displayState == DisplayState::Off) ? "envelope-gram off" : "envelope-gram";
-    g.drawText(label, bounds.reduced(5), juce::Justification::topRight);
+    // Label. In ErPlot mode the plot covers this canvas and brings its own labels, so naming the
+    // envelope-gram here would only show through its backdrop.
+    if (m_displayState != DisplayState::ErPlot) {
+        g.setColour(MyColours::accentColour.withAlpha(0.6f));
+        g.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 10.0f, juce::Font::bold));
+        juce::String label = (m_displayState == DisplayState::Off) ? "envelope-gram off" : "envelope-gram";
+        g.drawText(label, bounds.reduced(5), juce::Justification::topRight);
+    }
 }
 
 //juce::Colour SpectralDisplay::getColourForValue(float normalized)

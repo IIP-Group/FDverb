@@ -9,13 +9,9 @@ FDverbAudioProcessor::FDverbAudioProcessor()
     : AudioProcessor(BusesProperties()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts(*this, nullptr, "Parameters", createParameterLayout()),
-      m_fdverb(apvts)
+      apvts(*this, nullptr, "Parameters", createParameterLayout())
 {
-    // Initialize display bins to zero
-    for (auto& bin : envelopeDisplay) {
-        bin.store(0.0f);
-    }
+    clearEnvelopeDisplay();
 
     apvts.addParameterListener("FFTSIZE", this);
 }
@@ -100,11 +96,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout FDverbAudioProcessor::create
         juce::ParameterID("TAIL", 1), "Tail", gainRange, -12.0f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("PREDELAY", 1), "Predelay", makeDelayRange(1.0f, 500.0f, 0.5f), 20.0f));
+        juce::ParameterID("PREDELAY", 1), "Predelay", makeDelayRange(1.0f, 500.0f, 0.5f), 22.0f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID("DECAY", 1), "Decay",
-        makeDelayRange(100.0f, 10000.0f, 0.5f), 2000.0f));
+        makeDelayRange(100.0f, 10000.0f, 0.5f), 1700.0f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID("TILT", 1), "Tilt",
@@ -120,7 +116,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FDverbAudioProcessor::create
         juce::ParameterID("LINK", 1), "Link", false));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("TAILDELAY", 1), "Tail Delay", makeDelayRange(1.0f, 500.0f, 0.5f), 50.0f));
+        juce::ParameterID("TAILDELAY", 1), "Tail Delay", makeDelayRange(1.0f, 500.0f, 0.5f), 100.0f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID("WIDTH", 1), "Width",
@@ -128,7 +124,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FDverbAudioProcessor::create
 
     params.push_back(std::make_unique<juce::AudioParameterInt>(
         juce::ParameterID("ERTAPS", 1), "ER Taps",
-        0, 32, 16));
+        0, 32, 18));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID("ERLEVEL", 1), "ER Level", gainRange, -12.0f));
@@ -141,9 +137,22 @@ juce::AudioProcessorValueTreeState::ParameterLayout FDverbAudioProcessor::create
         juce::ParameterID("SHIFT", 1), "Shift",
         -100, 100, 0));
 
-    params.push_back(std::make_unique<juce::AudioParameterInt>(
+    // Drift: bins per hop, fractional — power-law taper for fine control near zero
+    const float kDriftMax = 100.0f;
+    const float kDriftExp = 2.0f;
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID("DRIFT", 1), "Drift",
-        -100, 100, 0));
+        juce::NormalisableRange<float>(
+            -kDriftMax, kDriftMax,
+            [kDriftMax, kDriftExp](float, float, float norm) {
+                float c = 2.0f * norm - 1.0f;
+                return std::copysign(std::pow(std::abs(c), kDriftExp), c) * kDriftMax;
+            },
+            [kDriftMax, kDriftExp](float, float, float value) {
+                float c = value / kDriftMax;
+                return (std::copysign(std::pow(std::abs(c), 1.0f / kDriftExp), c) + 1.0f) * 0.5f;
+            }),
+        0.0f));
 
     params.push_back(std::make_unique<juce::AudioParameterBool>(
         juce::ParameterID("ENVMODE", 1), "Envelope Mode", false));
@@ -238,6 +247,12 @@ void FDverbAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 {
     juce::ScopedNoDenormals noDenormals;
 
+    // Leaving bypass: start from silence instead of releasing the tail that was frozen mid-decay.
+    if (m_bypassed) {
+        m_bypassed = false;
+        resetReverbState();
+    }
+
     // read parameters
     float dry = *apvts.getRawParameterValue("DRY");
     float tail = *apvts.getRawParameterValue("TAIL");
@@ -253,7 +268,7 @@ void FDverbAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     float erlevel = *apvts.getRawParameterValue("ERLEVEL");
     float color = *apvts.getRawParameterValue("COLOR");
     int shift = static_cast<int>(*apvts.getRawParameterValue("SHIFT"));
-    int drift = static_cast<int>(*apvts.getRawParameterValue("DRIFT"));
+    float drift = *apvts.getRawParameterValue("DRIFT");
     bool envelopeModeIndex = static_cast<bool>(*apvts.getRawParameterValue("ENVMODE"));
     bool freeze = *apvts.getRawParameterValue("FREEZE") > 0.5f;
     bool freezeInput = *apvts.getRawParameterValue("FREEZEINPUT") > 0.5f;
@@ -283,7 +298,41 @@ void FDverbAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
     m_fdverb.processBlock(buffer);
 
-    updateEnvelopeDisplay();
+    // The worker clears the envelopes asynchronously, so until it has, reading them back would
+    // flash the pre-reset envelope onto the gram again.
+    if (!m_fdverb.isResetPending()) {
+        updateEnvelopeDisplay();
+    }
+}
+
+// Called every block while the host bypasses the plugin (the wrappers own the bypass parameter,
+// since getBypassParameter() is not overridden).
+void FDverbAudioProcessor::processBlockBypassed(juce::AudioBuffer<float>& buffer,
+                                                juce::MidiBuffer& midiMessages)
+{
+    // Entering bypass: the reverb stops being fed, so clear it rather than freeze it.
+    if (!m_bypassed) {
+        m_bypassed = true;
+        resetReverbState();
+    }
+
+    juce::AudioProcessor::processBlockBypassed(buffer, midiMessages);
+}
+
+// Hosts call this to clear the plugin state; the AU wrapper also calls it on the bypass edge, and a
+// host that stops rendering while bypassed reaches us through here only.
+void FDverbAudioProcessor::reset()
+{
+    resetReverbState();
+}
+
+void FDverbAudioProcessor::resetReverbState()
+{
+    m_fdverb.requestReset();
+
+    // The editor scrolls the envelope-gram from this array on its own timer, and while the plugin
+    // is not being processed nothing refreshes it — a filled array gets smeared across the canvas.
+    clearEnvelopeDisplay();
 }
 
 bool FDverbAudioProcessor::hasEditor() const { return true; }
@@ -337,6 +386,13 @@ void FDverbAudioProcessor::updateEnvelopeDisplay()
             if (envelope_r_ptr && envelope_r_ptr[j] > maxEnv) maxEnv = envelope_r_ptr[j];
         }
         envelopeDisplay[i].store(maxEnv);
+    }
+}
+
+void FDverbAudioProcessor::clearEnvelopeDisplay()
+{
+    for (auto& bin : envelopeDisplay) {
+        bin.store(0.0f);
     }
 }
 

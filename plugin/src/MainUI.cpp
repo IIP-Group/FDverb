@@ -139,6 +139,14 @@ FFTSizeComponent::FFTSizeComponent(juce::AudioProcessorValueTreeState& apvts,
     fftsizeSlider.setColour(Slider::textBoxTextColourId, MyColours::valueTextColour);
     addAndMakeVisible(fftsizeSlider);
 
+    auto notifyErPlotTouched = [this]() {
+        if (onErPlotTouched && HelperFunctions::isUserDrivenChange(fftsizeSlider))
+            onErPlotTouched();
+    };
+    fftsizeSlider.onDragStart = notifyErPlotTouched;
+    fftsizeSlider.onDragEnd = notifyErPlotTouched;
+    fftsizeSlider.onValueChange = notifyErPlotTouched;
+
     msLabel.setJustificationType(juce::Justification::centred);
     msLabel.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 11.0f, juce::Font::plain));
     msLabel.setColour(juce::Label::textColourId, MyColours::valueTextColour.withAlpha(0.55f));
@@ -201,6 +209,9 @@ FreezeTitleComponent::FreezeTitleComponent(juce::AudioProcessorValueTreeState& a
     freezeButton.setButtonText(freezeButton.getToggleState() ? "un-freeze" : "freeze");
     freezeButton.onClick = [this]() {
         freezeButton.setButtonText(freezeButton.getToggleState() ? "un-freeze" : "freeze");
+
+        if (onErPlotTouched && HelperFunctions::isUserDrivenChange(freezeButton))
+            onErPlotTouched();
     };
     addAndMakeVisible(freezeButton);
 
@@ -264,7 +275,11 @@ EnvelopeComponent::EnvelopeComponent(juce::AudioProcessorValueTreeState& apvts)
     modeButton.setClickingTogglesState(true);
     modeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         apvts, "ENVMODE", modeButton);
-    modeButton.onClick = [this]() { updateModeLabel(); };
+    modeButton.onClick = [this]() {
+        updateModeLabel();
+        if (onErPlotTouched && HelperFunctions::isUserDrivenChange(modeButton))
+            onErPlotTouched();
+    };
     addAndMakeVisible(modeButton);
 
     modeValueLabel.setJustificationType(juce::Justification::centred);
@@ -331,6 +346,14 @@ DecayTiltComponent::DecayTiltComponent(juce::AudioProcessorValueTreeState& apvts
     decaySlider.updateText();
     addAndMakeVisible(decaySlider);
 
+    auto notifyErPlotTouched = [this]() {
+        if (onErPlotTouched && HelperFunctions::isUserDrivenChange(decaySlider))
+            onErPlotTouched();
+    };
+    decaySlider.onDragStart = notifyErPlotTouched;
+    decaySlider.onDragEnd = notifyErPlotTouched;
+    decaySlider.onValueChange = notifyErPlotTouched;
+
     decayLabel.setText("time", juce::dontSendNotification);
     decayLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(decayLabel);
@@ -393,8 +416,7 @@ ShiftDriftComponent::ShiftDriftComponent(juce::AudioProcessorValueTreeState& apv
         return juce::String(static_cast<int>(std::round(v))) + " bins";
     };
     shiftSlider.valueFromTextFunction = [](const juce::String& t) {
-        return static_cast<double>(static_cast<int>(std::round(
-            t.retainCharacters("-0123456789").getDoubleValue())));
+        return t.retainCharacters("-0123456789").getDoubleValue();
     };
     shiftSlider.updateText();
     shiftSlider.onValueChange = [this]() {
@@ -419,22 +441,17 @@ ShiftDriftComponent::ShiftDriftComponent(juce::AudioProcessorValueTreeState& apv
     HelperFunctions::configureSlider(driftSlider);
     driftAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         apvts, "DRIFT", driftSlider);
-    driftSlider.textFromValueFunction = [](double v) {
-        return juce::String(static_cast<int>(std::round(v))) + " b/hop";
+    driftSlider.textFromValueFunction = [](double v) -> juce::String {
+        const double av = v < 0.0 ? -v : v;
+        if (av >= 100.0) return juce::String::formatted("%.0f b/hop", v);
+        if (av >= 10.0)  return juce::String::formatted("%.1f b/hop", v);
+        return juce::String::formatted("%.2f b/hop", v);
     };
     driftSlider.valueFromTextFunction = [](const juce::String& t) {
-        return static_cast<double>(static_cast<int>(std::round(
-            t.retainCharacters("-0123456789").getDoubleValue())));
+        return t.retainCharacters("-0123456789.").getDoubleValue();
     };
     driftSlider.updateText();
-    driftSlider.onValueChange = [this]() {
-        const double halfBlock = audioProcessor.getCurrentFftSize() / 2.0;
-        if (driftSlider.getValue() > halfBlock)
-            driftSlider.setValue(halfBlock, juce::sendNotificationSync);
-        else if (driftSlider.getValue() < -halfBlock)
-            driftSlider.setValue(-halfBlock, juce::sendNotificationSync);
-        updateSecondaryLabels();
-    };
+    driftSlider.onValueChange = [this]() { updateSecondaryLabels(); };
     addAndMakeVisible(driftSlider);
 
     driftLabel.setText("drift", juce::dontSendNotification);
@@ -474,10 +491,6 @@ void ShiftDriftComponent::clampShiftDrift()
     else if (shiftSlider.getValue() < -halfBlock)
         shiftSlider.setValue(-halfBlock, juce::sendNotificationSync);
 
-    if (driftSlider.getValue() > halfBlock)
-        driftSlider.setValue(halfBlock, juce::sendNotificationSync);
-    else if (driftSlider.getValue() < -halfBlock)
-        driftSlider.setValue(-halfBlock, juce::sendNotificationSync);
 }
 
 void ShiftDriftComponent::updateSecondaryLabels()
@@ -494,14 +507,21 @@ void ShiftDriftComponent::updateSecondaryLabels()
     const double binHz = sr / static_cast<double>(blockSize);
 
     auto formatHz = [](double hz, const juce::String& unit, const juce::String& kiloUnit) -> juce::String {
-        if (std::abs(hz) >= 1000.0)
-            return juce::String(hz / 1000.0, 2) + " " + kiloUnit;
-        return juce::String(hz, 1) + " " + unit;
+        const bool kilo = (hz >= 1000.0 || hz <= -1000.0);
+        const double v = kilo ? hz * 0.001 : hz;
+        const double av = v < 0.0 ? -v : v;
+        juce::String num;
+        if (av >= 100.0) num = juce::String::formatted("%.0f", v);
+        else if (av >= 10.0)  num = juce::String::formatted("%.1f", v);
+        else                  num = juce::String::formatted("%.2f", v);
+        return num + " " + (kilo ? kiloUnit : unit);
     };
 
     shiftHzLabel.setText(formatHz(shiftSlider.getValue() * binHz, "Hz", "kHz"),
                          juce::dontSendNotification);
-    driftHzSLabel.setText(formatHz(driftSlider.getValue() * binHz * binHz / 1000, "Hz/ms", "kHz/ms"),
+    // drift (bins/hop) × binHz (Hz/bin) × hopRate (hops/s) / 1000 → Hz/ms
+    const double hopRate = 2.0 * sr / static_cast<double>(blockSize);
+    driftHzSLabel.setText(formatHz(driftSlider.getValue() * binHz * hopRate / 1000.0, "Hz/ms", "kHz/ms"),
                           juce::dontSendNotification);
 }
 
@@ -579,6 +599,14 @@ LinkWidthComponent::LinkWidthComponent(juce::AudioProcessorValueTreeState& apvts
     };
     widthSlider.updateText();
     addAndMakeVisible(widthSlider);
+
+    auto notifyErPlotTouched = [this]() {
+        if (onErPlotTouched && HelperFunctions::isUserDrivenChange(widthSlider))
+            onErPlotTouched();
+    };
+    widthSlider.onDragStart = notifyErPlotTouched;
+    widthSlider.onDragEnd = notifyErPlotTouched;
+    widthSlider.onValueChange = notifyErPlotTouched;
 
     widthValueLabel.setJustificationType(juce::Justification::centred);
     widthValueLabel.setColour(juce::Label::textColourId, MyColours::valueTextColour);
@@ -710,6 +738,10 @@ ErPreTailComponent::ErPreTailComponent(juce::AudioProcessorValueTreeState& apvts
     erTapsSlider.setColour(FdverbLookAndFeel::elementFillColourId, MyColours::erFillColour);
     addAndMakeVisible(erTapsSlider);
 
+    erTapsSlider.onDragStart = [this]() { if (onErTapsTouched) onErTapsTouched(); };
+    erTapsSlider.onDragEnd   = [this]() { if (onErTapsTouched) onErTapsTouched(); };
+    erTapsSlider.onValueChange = [this]() { notifyErTapsTouched(erTapsSlider); };
+
     erTapsLabel.setText("echoes", juce::dontSendNotification);
     erTapsLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(erTapsLabel);
@@ -722,10 +754,16 @@ ErPreTailComponent::ErPreTailComponent(juce::AudioProcessorValueTreeState& apvts
     predelaySlider.setColour(FdverbLookAndFeel::elementFillColourId, MyColours::erFillColour);
     addAndMakeVisible(predelaySlider);
 
+    predelaySlider.onDragStart = [this]() { if (onErTapsTouched) onErTapsTouched(); };
+    predelaySlider.onDragEnd   = [this]() { if (onErTapsTouched) onErTapsTouched(); };
+
     predelaySlider.onValueChange = [this]() {
         double minTail = predelaySlider.getValue() + 1.0;
         if (tailDelaySlider.getValue() < minTail)
             tailDelaySlider.setValue(minTail, juce::sendNotificationSync);
+
+        // after the cross-set, so the plot is built from both settled values
+        notifyErTapsTouched(predelaySlider);
     };
 
     predelayLabel.setText("pre delay", juce::dontSendNotification);
@@ -736,9 +774,17 @@ ErPreTailComponent::ErPreTailComponent(juce::AudioProcessorValueTreeState& apvts
     tailDelayAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         apvts, "TAILDELAY", tailDelaySlider);
     HelperFunctions::configureDelaySlider(tailDelaySlider);
+    // brackets mark a setting the processor is currently clamping away
+    tailDelaySlider.textFromValueFunction = [this](double v) {
+        const juce::String text = juce::String(static_cast<int>(std::round(v))) + " ms";
+        return v < audioProcessor.getMinTailDelayMs() ? "[" + text + "]" : text;
+    };
     tailDelaySlider.updateText();
     tailDelaySlider.setColour(FdverbLookAndFeel::elementFillColourId, MyColours::erFillColour);
     addAndMakeVisible(tailDelaySlider);
+
+    tailDelaySlider.onDragStart = [this]() { if (onErTapsTouched) onErTapsTouched(); };
+    tailDelaySlider.onDragEnd   = [this]() { if (onErTapsTouched) onErTapsTouched(); };
 
     tailDelaySlider.onValueChange = [this]() {
         double floor = audioProcessor.getMinTailDelayMs();
@@ -747,11 +793,57 @@ ErPreTailComponent::ErPreTailComponent(juce::AudioProcessorValueTreeState& apvts
         double maxPreDelay = tailDelaySlider.getValue() - 1.0;
         if (predelaySlider.getValue() > maxPreDelay)
             predelaySlider.setValue(maxPreDelay, juce::sendNotificationSync);
+
+        // after the cross-set, so the plot is built from both settled values
+        notifyErTapsTouched(tailDelaySlider);
     };
 
     tailDelayLabel.setText("tail delay", juce::dontSendNotification);
     tailDelayLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(tailDelayLabel);
+
+    tailDelayEffectiveLabel.setText("", juce::dontSendNotification);
+    tailDelayEffectiveLabel.setJustificationType(juce::Justification::centred);
+    tailDelayEffectiveLabel.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 11.0f, juce::Font::plain));
+    tailDelayEffectiveLabel.setColour(juce::Label::textColourId, MyColours::valueTextColour);
+    addAndMakeVisible(tailDelayEffectiveLabel);
+
+    refreshTailDelayFloor();
+}
+
+void ErPreTailComponent::notifyErTapsTouched(const juce::Slider& source)
+{
+    if (onErTapsTouched && HelperFunctions::isUserDrivenChange(source))
+        onErTapsTouched();
+}
+
+void ErPreTailComponent::refreshTailDelayFloor()
+{
+    // The processor clamps the tail delay to this floor instead of rewriting the parameter, so the
+    // knob marks the unreachable range and, while clamping, the value actually in use.
+    const float floorMs = audioProcessor.getMinTailDelayMs();
+    const bool clamped = tailDelaySlider.getValue() < floorMs;
+
+    const bool floorMoved = (floorMs != m_shownTailDelayFloorMs);
+    if (!floorMoved && clamped == m_tailDelayClamped) {
+        return;
+    }
+    m_shownTailDelayFloorMs = floorMs;
+    m_tailDelayClamped = clamped;
+
+    if (floorMoved) {
+        const double norm = tailDelaySlider.valueToProportionOfLength(floorMs);
+        tailDelaySlider.getProperties().set("unreachableBelow", juce::jlimit(0.0, 1.0, norm));
+    }
+
+    tailDelayEffectiveLabel.setText(
+        clamped ? juce::String(juce::CharPointer_UTF8("\xe2\x86\x92 "))
+                      + juce::String(static_cast<int>(std::round(floorMs))) + " ms"
+                : juce::String(),
+        juce::dontSendNotification);
+
+    tailDelaySlider.updateText();  // brackets appear or disappear with the clamped state
+    tailDelaySlider.repaint();
 }
 
 ErPreTailComponent::~ErPreTailComponent()
@@ -762,7 +854,8 @@ void ErPreTailComponent::paint(juce::Graphics& g)
 {
     g.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 11.0f, juce::Font::bold));
     g.setColour(MyColours::accentColour.withAlpha(0.6f));
-    g.drawFittedText("noise seed", m_predelaySubtitleBounds, juce::Justification::centredBottom, 1);
+    // pre-delay doubles as the seed for the ER tap times and pans
+    g.drawFittedText("pattern seed", m_predelaySubtitleBounds, juce::Justification::centredBottom, 1);
 }
 
 void ErPreTailComponent::resized()
@@ -786,7 +879,11 @@ void ErPreTailComponent::resized()
     auto tailDelayBounds = bounds;
     auto tailDelayLabelBounds = tailDelayBounds.removeFromTop(tailDelayBounds.getHeight() * 0.15f);
     tailDelayLabel.setBounds(tailDelayLabelBounds);
-    tailDelaySlider.setBounds(tailDelayBounds.withTop(tailDelayBounds.getY() - 20));
+    auto tailDelaySliderBounds = tailDelayBounds.withTop(tailDelayBounds.getY() - 20);
+    tailDelaySlider.setBounds(tailDelaySliderBounds);
+    // The LookAndFeel translates the textbox up 25px, leaving 25px free at the slider bottom
+    tailDelayEffectiveLabel.setBounds(tailDelaySliderBounds.getX(), tailDelaySliderBounds.getBottom() - 23,
+                                      tailDelaySliderBounds.getWidth(), 16);
 }
 
 
@@ -818,6 +915,10 @@ MixComponent::MixComponent(juce::AudioProcessorValueTreeState& apvts)
     erLevelSlider.setColour(FdverbLookAndFeel::elementFillColourId, MyColours::erFillColour);
     addAndMakeVisible(erLevelSlider);
 
+    erLevelSlider.onDragStart = [this]() { notifyErPlotTouched(erLevelSlider); };
+    erLevelSlider.onDragEnd = [this]() { notifyErPlotTouched(erLevelSlider); };
+    erLevelSlider.onValueChange = [this]() { notifyErPlotTouched(erLevelSlider); };
+
     erLevelLabel.setText("er level", juce::dontSendNotification);
     erLevelLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(erLevelLabel);
@@ -829,9 +930,19 @@ MixComponent::MixComponent(juce::AudioProcessorValueTreeState& apvts)
     tailSlider.updateText();
     addAndMakeVisible(tailSlider);
 
+    tailSlider.onDragStart = [this]() { notifyErPlotTouched(tailSlider); };
+    tailSlider.onDragEnd = [this]() { notifyErPlotTouched(tailSlider); };
+    tailSlider.onValueChange = [this]() { notifyErPlotTouched(tailSlider); };
+
     tailLabel.setText("tail level", juce::dontSendNotification);
     tailLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(tailLabel);
+}
+
+void MixComponent::notifyErPlotTouched(const juce::Slider& source)
+{
+    if (onErPlotTouched && HelperFunctions::isUserDrivenChange(source))
+        onErPlotTouched();
 }
 
 MixComponent::~MixComponent()
@@ -908,7 +1019,31 @@ MainUI::MainUI(FDverbAudioProcessor& p) : audioProcessor(p)
     mixComponent = std::make_unique<MixComponent>(p.apvts);
     addAndMakeVisible(*mixComponent);
 
+    // added last so it sits in front of the spectral display it overlays
+    erDisplay = std::make_unique<ErDisplay>(audioProcessor, *spectralDisplay);
+    addChildComponent(*erDisplay);
+
+    // the envelope-gram's ErPlot mode is what holds the plot on screen
+    spectralDisplay->onDisplayStateChanged = [this]() {
+        erDisplay->setConstant(spectralDisplay->isErPlotMode());
+    };
+
+    erPreTailComponent->onErTapsTouched = [this]() { erDisplay->showTemporarily(); };
+
+    // these reshape the plot but do not summon it on their own
+    linkWidthComponent->onErPlotTouched = [this]() { erDisplay->refreshIfVisible(); };
+    mixComponent->onErPlotTouched = [this]() { erDisplay->refreshIfVisible(); };
+    decayTiltComponent->onErPlotTouched = [this]() { erDisplay->refreshIfVisible(); };
+    envelopeComponent->onErPlotTouched = [this]() { erDisplay->refreshIfVisible(); };
+    freezeTitleComponent->onErPlotTouched = [this]() { erDisplay->refreshIfVisible(); };
+    fftsizeComponent->onErPlotTouched = [this]() { erDisplay->refreshIfVisible(); };
+
+    // mark unoptimized builds, whose timing behavior does not represent a release
+   #if JUCE_DEBUG
+    versionLabel.setText("v" PLUGIN_VERSION "-debug", juce::dontSendNotification);
+   #else
     versionLabel.setText("v" PLUGIN_VERSION, juce::dontSendNotification);
+   #endif
     versionLabel.setJustificationType(juce::Justification::centredLeft);
     versionLabel.setFont(juce::Font(10.0f));
     versionLabel.setColour(juce::Label::textColourId, juce::Colours::grey);
@@ -990,15 +1125,30 @@ void MainUI::resized()
     auto visualizerSlot = rightSection.removeFromTop(rightSection.getHeight() * 0.33f);
     auto erSlot         = rightSection.removeFromTop(rightSection.getHeight() * 0.50f);
     auto mixSlot        = rightSection;
-    spectralDisplay->setBounds(visualizerSlot.withTrimmedLeft(vizMargin)
-                                             .withTrimmedRight(vizMargin)
-                                             .withTrimmedBottom(vizMargin));
+    const auto visualizerBounds = visualizerSlot.withTrimmedLeft(vizMargin)
+                                                .withTrimmedRight(vizMargin)
+                                                .withTrimmedBottom(vizMargin);
+    spectralDisplay->setBounds(visualizerBounds);
+    erDisplay->setBounds(visualizerBounds);
     erPreTailComponent->setBounds(erSlot);
     mixComponent->setBounds(mixSlot);
 }
 
 void MainUI::timerCallback()
 {
+    // the floor moves with FFT size, sample rate and host block size
+    if (erPreTailComponent != nullptr) {
+        erPreTailComponent->refreshTailDelayFloor();
+    }
+
+    const float floorMs = audioProcessor.getMinTailDelayMs();
+    if (floorMs != m_lastTailDelayFloorMs) {
+        m_lastTailDelayFloorMs = floorMs;
+        if (erDisplay != nullptr) {
+            erDisplay->refreshIfVisible();  // the tail region starts at this floor
+        }
+    }
+
     if constexpr (kShowDevInfo) {
         effectiveFftSizeLabel.setText("fft size: " + juce::String(audioProcessor.getCurrentFftSize()), juce::dontSendNotification);
     }

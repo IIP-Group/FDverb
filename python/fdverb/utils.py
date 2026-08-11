@@ -43,7 +43,7 @@ def load_fdverb_config(config_file='../presets/default.yaml'):
     params['ERTAPS'] = config['early_reflections']['taps']
     params['PREDELAY'] = config['early_reflections']['predelay']
     params['TAILDELAY'] = config['early_reflections']['taildelay']
-    params['ERDECAYSCALE'] = config['early_reflections']['decay_scale']
+    params['ERDECAYRATE'] = config['early_reflections']['decay_rate']
     params['ER2TAIL'] = config['early_reflections']['er2tail_gain']
     params['ERPRESET'] = config['early_reflections']['er_preset']
 
@@ -70,12 +70,14 @@ def load_fdverb_config(config_file='../presets/default.yaml'):
     assert -1 <= params['TILT'] <= 1, "tilt must be between -1 and 1"
     assert 0 <= params['WIDTH'] <= 2, "width must be between 0 and 2"
     assert params['LINK'] in [True, False], "stereo link must be True or False"
-    assert params['LOWCUT'] >= 0, "low cut must be non-negative"
-    assert params['HIGHCUT'] >= 0, "high cut must be non-negative"
+    assert params['LOWCUT'] is None or params['LOWCUT'] >= 0, "low cut must be non-negative"
+    assert params['HIGHCUT'] is None or params['HIGHCUT'] >= 0, "high cut must be non-negative"
+    if params['LOWCUT'] is not None and params['HIGHCUT'] is not None:
+        assert params['LOWCUT'] < params['HIGHCUT'], "low cut must be below high cut"
     assert params['ERTAPS'] >= 0, "number of early reflections taps must be non-negative"
     assert params['PREDELAY'] >= 0, "predelay must be non-negative"
     assert params['TAILDELAY'] > params['PREDELAY'], "tail delay must be greater than predelay"
-    assert params['ERDECAYSCALE'] >= 0, "ER decay scale must not be negative"
+    assert params['ERDECAYRATE'] > 0, "ER decay rate must be positive"
     assert params['ER2TAIL'] >= 0, "ER to tail gain must be non-negative"
     assert params['ERPRESET'] in [None, 'boston_er'], "er_preset must be None or 'boston_er'"
     # assert params['DRYLEVEL']

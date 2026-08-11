@@ -1,19 +1,17 @@
 # FDverb
 
 A frequency-domain artificial reverberation effect.
-FDverb is implemented as a plugin (see [plugin/](plugin/), using the [JUCE framework](https://github.com/juce-framework/JUCE) and as an offline Python implementation (see [python/](python/)).
+FDverb is implemented as a plugin (see [plugin/](plugin/)) and as an offline Python implementation (see [python/](python/)).
+
+Check the [FDverb project page](https://iip.ethz.ch/research/syneth-audio-synthesis/project-FDverb.html) for supplementary material.
+
+![FDverb plugin UI](docs/img/plugin_ui.png)
 
 ## Credits
 
-Developed by [Integrated Information Processing (IIP) Group at ETH Zurich](https://iip.ethz.ch):
+Developed by Nishanth Kumar, Silvan Krebs, David Wieland, Christoph Studer, and Jonas Roth at the [Integrated Information Processing (IIP) Group at ETH Zurich](https://iip.ethz.ch). 
 
-- Nishanth Kumar
-- Silvan Krebs
-- David Wieland
-- Christoph Studer
-- Jonas Roth
-
-Built with [JUCE](https://juce.com).
+Built using the [JUCE](https://github.com/juce-framework/JUCE) framework.
 
 ## Features
 
@@ -29,8 +27,10 @@ Built with [JUCE](https://juce.com).
 ### Python-Only Features
 The Python implementation has a number of extra features implemented, compared to the plugin implementation:
 
-- Load a preset early-reflections IR (config parameter `early_reflections:er_preset:`).
-- Send early-reflections signal to tail reverberator (config parameter `early_reflections:er2tail_gain:`).
+- Load a preset early-reflections IR (config parameter `early_reflections:er_preset`).
+- Send early-reflections signal to tail reverberator (config parameter `early_reflections:er2tail_gain`).
+- Tune the early-reflections decay rate (config parameter `early_reflections:decay_rate`, in dB/ms).
+  The plugin fixes this rate at 0.2 dB/ms, so presets must keep that value to match it.
 
 ## Getting Started
 
@@ -69,7 +69,7 @@ Output is saved to `python/out/out.wav` and plays automatically.
 
 ### Development
 
-Recommended development requirements are provided in `python/requirements.dev`.
+Recommended development requirements are provided in `python/requirements-dev.txt`.
 ```bash
 pip install -r requirements-dev.txt
 nbstripout --install
@@ -81,53 +81,47 @@ pip-compile requirements.in
 ```
 
 
-## C++  (JUCE)
+## C++ (JUCE)
 ### Requirements
 - CMake 3.22+
-- C++17 compatible compiler
+- C++17-compatible compiler
 - JUCE framework
 
-### macOS
-Make Xcode project:
+### Building
 ```bash
-mkdir /build
-cd /build
-cmake .. -G Xcode
-open FDverb.xcodeproj
+cd plugin
+cmake --preset macos                  # or: windows
+cmake --build --preset macos-release  # or: windows-release
 ```
 
-Build the VST3 or AU target in Xcode. s are output to:
-- `/build/FDverb_artefacts/Debug/VST3/FDverb.vst3`
-- `/build/FDverb_artefacts/Debug/AU/FDverb.component`
+Build presets: `macos-debug`, `macos-release`, `windows-debug`, `windows-release`.
+Use Release for listening tests and releases — Debug builds are unoptimized and show
+`-debug` next to the version number in the UI.
 
-After the build process, the s are automatically copied the standard user directory.
-If this behavior is undesired, remove the following line in `plugin/CMakeLists.txt`.
-```Make
+Plugins are output to `plugin/build/FDverb_artefacts/<Config>/`, where `<Config>` is
+`Debug` or `Release`, and are copied to the standard user plugin directory after each
+build. To disable the copy, remove this line from `plugin/CMakeLists.txt`:
+```cmake
     COPY_PLUGIN_AFTER_BUILD TRUE
 ```
+On Windows the default location `C:\Program Files\Common Files\VST3\` is a protected
+system folder, so the copy fails unless Visual Studio runs as administrator.
 
-### Windows
-Using Visual Studio, open the project folder using File > Open > Folder... When prompted, enable CMake integration and select CMakeLists.txt in `plugin/`.
-This will automatically configure the project.
-
-The default plugin location on windows is C:\Program Files\Common Files\VST3\ which is a protected system folder. If VS is not running as administrator, the plugin will fail to copy to this location. 
-You can disable the automatic copy by removing the following line in `plugin/CMakeLists.txt`:
-```Make
-    COPY_PLUGIN_AFTER_BUILD TRUE
-```
-
-Plugins are output to:
-- `\plugin\out\build\x64-Debug\FDverb_artefacts\Debug\VST3\FDverb.vst3\Contents\x86_64-win\FDverb.vst3`
+### IDEs
+`cmake --preset macos` also generates `plugin/build/FDverb.xcodeproj`. Visual Studio
+(File > Open > Folder...) and VS Code (CMake Tools) read the presets directly; select the
+configuration from the preset list.
 
 ### Runtime Measurement Mode
 
 To re-run the `processFrame()` timing measurements, build with `-DFDVERB_MEASURE_TIMING=ON`:
 ```bash
-cd plugin/build
-cmake .. -DFDVERB_MEASURE_TIMING=ON
-xcodebuild -project FDverb.xcodeproj -scheme FDverb_All -configuration Debug build
+cd plugin
+cmake --preset macos -DFDVERB_MEASURE_TIMING=ON
+cmake --build --preset macos-release
 ```
 While the plugin runs, measurements are appended to `~/Desktop/fdverb_runtime_measurements/<timestamp>_blocksize_<N>.txt`.
+Since the AU is declared sandbox-safe (`AU_SANDBOX_SAFE`), a sandboxed host may redirect that path into its own container, e.g. `~/Library/Containers/<host>/Data/Desktop/`.
 Run `python/scripts/runtime_analysis.ipynb` to analyze the results — it reads directly from that directory.
 Rebuild with `-DFDVERB_MEASURE_TIMING=OFF` when done.
 
@@ -165,14 +159,14 @@ A preset exists in three forms:
 1. Create the YAML in `presets/`, following `presets/default.yaml`.
 2. Add it to `PRESET_FILES` in `python/scripts/yaml_to_preset.py` (filename + display name).
 3. Add its `BinaryData::` entry to `kPresets[]` in `plugin/src/PluginProcessor.cpp` (JUCE strips hyphens from BinaryData identifiers).
-4. Reconfigure CMake (`cmake ..` from the build dir) so the glob picks up the new XML.
+4. Reconfigure CMake (`cmake --preset macos # or windows`, see above) so the glob picks up the new XML.
 
 Then run the build steps below from step **6**.
 
 #### Editing a preset
 
 5. Edit the YAML in `presets/`.
-6. Regenerate the XML: `python python/scripts/yaml_to_preset.py` (run from repo root).
+6. Regenerate the XML: `python python/scripts/yaml_to_preset.py` (from the repo root).
 7. Re-export the `.vstpreset` file: load FDverb in Reaper, select the preset, and save it as a `.vstpreset` into `presets/vstpreset/`.
 8. Build, and commit the YAML plus the updated `generated/` and `vstpreset/` files.
 

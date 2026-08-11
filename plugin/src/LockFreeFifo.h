@@ -47,6 +47,14 @@ struct LockFreeFifo
         return size1 + size2;
     }
     
+    // Drops everything currently queued. Consumer side only, like read().
+    void discardAll()
+    {
+        int start1, size1, start2, size2;
+        fifo.prepareToRead(fifo.getNumReady(), start1, size1, start2, size2);
+        fifo.finishedRead(size1 + size2);
+    }
+
     int getNumReady()
     {
         return fifo.getNumReady();

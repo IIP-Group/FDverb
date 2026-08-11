@@ -16,14 +16,14 @@ stereo:
     width: 0.5                  # 0.0: mid, 1.0: mid+side, 2.0: side
 
 eq:
-    low_cut: 20                 # Hz
-    high_cut: 20000             # Hz
+    low_cut: 20                 # Hz (null = bypass)
+    high_cut: 20000             # Hz (null = bypass)
 
 early_reflections:
     taps: 18
     predelay: 22                # ms, relative to t=0
     taildelay: 100              # ms, relative to t=0
-    decay_scale: 0.16           # [python only] decay rate for ERs relative to (global) RT60 for tail
+    decay_rate: 0.2             # [python only] ER decay in dB/ms from the first tap; mirrors the plugin
     er2tail_gain: 0.00          # [python only] send ER signal to tail reverberator
     er_preset: null             # [python only] load a preset for the ER-IR: null, 'boston_er'
 
