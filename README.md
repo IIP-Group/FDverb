@@ -3,7 +3,7 @@
 A frequency-domain artificial reverberation effect.
 FDverb is implemented as a plugin (see [plugin/](plugin/)) and as an offline Python implementation (see [python/](python/)).
 
-Check the [FDverb project page](https://iip.ethz.ch/research/syneth-audio-synthesis/project-FDverb.html) for supplementary material.
+📄 **Paper:** "A Frequency-Domain Artificial Reverberator Plug-In," demo paper presented at the *Int. Conf. Digital Audio Effects (DAFx-26)*, Cambridge, 2026. [[PDF]](https://www.dafx.de/paper-archive/2026/papers/DAFx26_demo_66.pdf) [[arXiv]](https://arxiv.org/abs/2608.27695)
 
 ![FDverb plugin UI](docs/img/plugin_ui.png)
 
@@ -31,6 +31,48 @@ The Python implementation has a number of extra features implemented, compared t
 - Send early-reflections signal to tail reverberator (config parameter `early_reflections:er2tail_gain`).
 - Tune the early-reflections decay rate (config parameter `early_reflections:decay_rate`, in dB/ms).
   The plugin fixes this rate at 0.2 dB/ms, so presets must keep that value to match it.
+
+## How It Works
+
+FDverb is a hybrid pipeline with two parts:
+
+- **Early reflections (ER):** a synthetic, sparse ER impulse response, implemented as a sparse convolution in the time domain so it adds no extra latency.
+- **Tail reverberator:** a vocoder with a noise carrier. The input is analyzed with an STFT, each frequency bin gets its own envelope follower, and these envelopes weight the spectral components of a noise signal. Conceptually related to *spectral magnitude decay* (Vickers et al., AES 121st Conv., 2006).
+
+## Parameters
+
+### Tail Reverberator
+
+| Parameter | Description |
+|---|---|
+| `block_size` | STFT block size. Trade-off between frequency resolution and the lower limit on `tail_delay`. |
+| `mode` | Envelope (AR-averager) mode — see below. |
+| `color` | Amplitude power γ. Affects dynamics and frequency weighting. |
+| `time` | Nominal T60 decay time. |
+| `tilt` | Increase/decrease decay time for lower/higher frequencies. |
+| `shift` | Static pitch shift (offsets the input bins). |
+| `drift` | Dynamic pitch shift (offsets the AR-averager states). |
+| `link` | Links envelopes between the stereo channels (follows the maximum). |
+| `width` | Correlates, decorrelates, or anti-correlates the noise carrier between the stereo channels. |
+| `low_cut` / `high_cut` | Brick-wall EQ applied to the noise carrier. |
+
+**Modes**
+
+| Mode | Behavior |
+|---|---|
+| `logarithmic` | Exponential-decay envelope (constant factor). Sounds like a regular reverb. |
+| `arithmetic` | Linear envelope (constant decrement). Sounds like a gated reverb. |
+| `freeze` | Infinite sustain; `gate` controls whether the input signal is routed into the reverb. |
+
+### Early Reflections
+
+Tap delays follow a pseudo-random pattern, with delays distributed between `pre_delay` and `tail_delay` (density grows ∝ t²) and a fixed amplitude decay of −0.2 dB/ms (tunable in Python only, see above).
+
+| Parameter | Description |
+|---|---|
+| `echoes` | Number of ER taps. |
+| `pre_delay` | Delay of the first reflection. Also sets the RNG seed for the tap pattern. |
+| `tail_delay` | Delay of the last reflection and onset of the tail reverberator. Lower limit depends on `block_size`. |
 
 ## Getting Started
 
@@ -169,6 +211,21 @@ Then run the build steps below from step **6**.
 6. Regenerate the XML: `python python/scripts/yaml_to_preset.py` (from the repo root).
 7. Re-export the `.vstpreset` file: load FDverb in Reaper, select the preset, and save it as a `.vstpreset` into `presets/vstpreset/`.
 8. Build, and commit the YAML plus the updated `generated/` and `vstpreset/` files.
+
+## Citation
+
+If you use FDverb in your work, please cite:
+
+```bibtex
+@misc{roth2026fdverb,
+  author        = {Roth, Jonas and Kumar, Nishanth and Krebs, Silvan and Wieland, David and Studer, Christoph},
+  title         = {A Frequency-Domain Artificial Reverberator Plug-In},
+  howpublished  = {Demo paper presented at the Int. Conf. Digital Audio Effects (DAFx-26), Cambridge},
+  year          = {2026},
+  eprint        = {2608.27695},
+  archivePrefix = {arXiv}
+}
+```
 
 ## License
 FDverb is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
